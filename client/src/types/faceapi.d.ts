@@ -1,0 +1,2 @@
+declare const faceapi: any
+
