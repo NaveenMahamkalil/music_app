@@ -73,6 +73,14 @@ async function initDb() {
       mood VARCHAR(64) NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `)
+
+  try {
+    await db.execute(
+      'ALTER TABLE users ADD COLUMN setupComplete TINYINT(1) NOT NULL DEFAULT 1',
+    )
+  } catch (err) {
+    if (err.errno !== 1060 && err.code !== 'ER_DUP_FIELDNAME') throw err
+  }
 }
 
 app.get('/api/health', (_req, res) => {
@@ -92,7 +100,7 @@ async function findUserById(id) {
 async function createUser(user) {
   const moodGenresJson = JSON.stringify(user.moodGenres)
   await db.execute(
-    'INSERT INTO users (id, name, email, passwordHash, createdAt, baseGenre, moodGenres, mode, mood) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO users (id, name, email, passwordHash, createdAt, baseGenre, moodGenres, mode, mood, setupComplete) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       user.id,
       user.name,
@@ -103,13 +111,14 @@ async function createUser(user) {
       moodGenresJson,
       user.mode,
       user.mood,
+      user.setupComplete ? 1 : 0,
     ],
   )
 }
 
 async function updateUserPreferences(userId, { baseGenre, moodGenres, mode, mood }) {
   await db.execute(
-    'UPDATE users SET baseGenre = ?, moodGenres = ?, mode = ?, mood = ? WHERE id = ?',
+    'UPDATE users SET baseGenre = ?, moodGenres = ?, mode = ?, mood = ?, setupComplete = 1 WHERE id = ?',
     [baseGenre, JSON.stringify(moodGenres), mode, mood, userId],
   )
 }
@@ -122,11 +131,14 @@ function parseUser(row) {
       : typeof row.moodGenres === 'string'
         ? JSON.parse(row.moodGenres)
         : row.moodGenres
+  const setupComplete =
+    row.setupComplete == null ? true : Number(row.setupComplete) === 1
   return {
     id: row.id,
     name: row.name,
     email: row.email,
     createdAt: row.createdAt,
+    setupComplete,
     preferences: {
       baseGenre: row.baseGenre,
       moodGenres,
@@ -134,6 +146,11 @@ function parseUser(row) {
       mood: row.mood,
     },
   }
+}
+
+function publicUser(user) {
+  if (!user) return null
+  return { id: user.id, name: user.name, email: user.email, setupComplete: user.setupComplete }
 }
 
 app.post('/api/auth/signup', async (req, res) => {
@@ -159,12 +176,13 @@ app.post('/api/auth/signup', async (req, res) => {
     moodGenres: { happy: 'pop', sad: 'pop', relaxed: 'pop', energetic: 'pop', chill: 'pop', angry: 'pop' },
     mode: 'on',
     mood: 'happy',
+    setupComplete: false,
   }
 
   await createUser(user)
 
   const token = signToken(user)
-  res.json({ token, user: { id: user.id, name: user.name, email: user.email } })
+  res.json({ token, user: publicUser({ ...user, setupComplete: false }) })
 })
 
 app.post('/api/auth/login', async (req, res) => {
@@ -180,7 +198,7 @@ app.post('/api/auth/login', async (req, res) => {
 
   const user = parseUser(row)
   const token = signToken(user)
-  res.json({ token, user: { id: user.id, name: user.name, email: user.email } })
+  res.json({ token, user: publicUser(user) })
 })
 
 app.get('/api/auth/me', authRequired, async (req, res) => {
@@ -189,7 +207,7 @@ app.get('/api/auth/me', authRequired, async (req, res) => {
   if (!row) return res.status(401).json({ error: 'unauthorized' })
 
   const user = parseUser(row)
-  res.json({ user: { id: user.id, name: user.name, email: user.email } })
+  res.json({ user: publicUser(user) })
 })
 
 app.get('/api/user/preferences', authRequired, async (req, res) => {

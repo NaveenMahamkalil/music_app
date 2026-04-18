@@ -13,7 +13,7 @@ import {
 } from '../lib/prefs'
 
 export default function Setup() {
-  const { user } = useAuth()
+  const { user, refreshUser } = useAuth()
   const navigate = useNavigate()
 
   if (!user) return <Navigate to="/login" replace />
@@ -25,10 +25,12 @@ export default function Setup() {
   const [genre, setGenre] = useState<Genre>(existingGenre)
   const [moodGenres, setMoodGenresState] = useState(existingMoodGenres)
 
-  const isDone = Boolean(localStorage.getItem('genre') && localStorage.getItem('moodGenres'))
-  if (isDone) return <Navigate to="/dashboard" replace />
+  if (user.setupComplete !== false) {
+    const isDone = Boolean(localStorage.getItem('genre') && localStorage.getItem('moodGenres'))
+    if (isDone) return <Navigate to="/dashboard" replace />
+  }
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setUsername(userName)
     setBaseGenre(genre)
@@ -38,23 +40,29 @@ export default function Setup() {
 
     const token = localStorage.getItem('token')
     if (token) {
-      fetch('/api/user/preferences', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          baseGenre: genre,
-          moodGenres,
-          mode: 'on',
-          mood: localStorage.getItem('mood') || 'happy',
-        }),
-      }).catch(() => {
-        // sync failure handled by localStorage fallback
-      })
+      try {
+        const res = await fetch('/api/user/preferences', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            baseGenre: genre,
+            moodGenres,
+            mode: 'on',
+            mood: localStorage.getItem('mood') || 'happy',
+          }),
+        })
+        if (!res.ok) {
+          // keep local prefs; user can retry from settings
+        }
+      } catch {
+        // network error — local prefs still saved above
+      }
     }
 
+    await refreshUser()
     navigate('/dashboard', { replace: true })
   }
 

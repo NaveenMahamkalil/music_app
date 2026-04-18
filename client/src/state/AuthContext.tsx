@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 
-type User = { id: string; name: string; email: string }
+type User = { id: string; name: string; email: string; setupComplete?: boolean }
 
 type AuthContextValue = {
   user: User | null
@@ -8,6 +8,7 @@ type AuthContextValue = {
   isLoading: boolean
   signup: (params: { name: string; email: string; password: string }) => Promise<void>
   login: (params: { email: string; password: string }) => Promise<void>
+  refreshUser: () => Promise<void>
   logout: () => void
 }
 
@@ -85,6 +86,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       token,
       isLoading,
+      async refreshUser() {
+        const t = localStorage.getItem(LS_TOKEN)
+        if (!t) return
+        const res = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${t}` },
+        })
+        if (!res.ok) return
+        const data = (await res.json()) as { user: User }
+        setUser(data.user)
+        localStorage.setItem(LS_USER, JSON.stringify(data.user))
+      },
       async signup({ name, email, password }) {
         const res = await fetch('/api/auth/signup', {
           method: 'POST',
